@@ -18,6 +18,7 @@ import urlparse
 
 # config
 tasklist_id = '@default'
+auth_storage = '/tmp/tasks.dat'
 
 namespaces = {}
 
@@ -460,7 +461,7 @@ def application(environ, start_response, exc_info=None):
 		scope='https://www.googleapis.com/auth/tasks',
 		user_agent='caldav to gtasks/1')
 
-	storage = oauth2client.file.Storage('/tmp/tasks.dat')
+	storage = oauth2client.file.Storage(auth_storage)
 
 	query = dict(urlparse.parse_qsl(environ['QUERY_STRING']))
 
@@ -494,7 +495,8 @@ def application(environ, start_response, exc_info=None):
 	if credential is None or credential.invalid == True:
 		headers = []
 		start_response(_response(httplib.UNAUTHORIZED), headers)
-		return ['cannot authenticate with Google Tasks, visit /cal?oauth=1']
+		return ['cannot authenticate with Google Tasks, visit %s?oauth=1' %
+				environ['SCRIPT_NAME']]
 
 	http = httplib2.Http()
 	http = credential.authorize(http)
@@ -508,7 +510,7 @@ def application(environ, start_response, exc_info=None):
 			return methods[method](environ, start_response, service)
 		except(oauth2client.client.AccessTokenRefreshError):
 			start_response(_response(httplib.UNAUTHORIZED), [])
-			return ['revisit /cal?oauth=1']
+			return ['revisit %s?oauth=1' % environ['SCRIPT_NAME']]
 	else:
 		print >> environ['wsgi.errors'], '%s is not allowed' % method
 		start_response(_response(httplib.METHOD_NOT_ALLOWED), [])

@@ -1,3 +1,47 @@
 caldav-to-gtasks
 ================
 A caldav server that sends to Google Tasks
+
+Hi, I just completed an implementation of this.
+
+It requires:
+Python 2.7
+Google Python API Client (http://code.google.com/p/google-api-python-client/)
+iCalendar Python Library (http://codespeak.net/icalendar/)
+Apache and mod_wsgi
+
+...and I tested it on a Linux machine, so if you've got a different setup you'll have to report any problems you have so I can fix them.
+
+The code is available here:
+https://github.com/matthewbauer/caldav-to-gtasks
+
+It is a little rough around the edges, so I'm still willing to work with you to make it work and help you through any problems.
+
+I'd suggest a configuration like this in your /etc/httpd/conf/httpd.conf:
+
+<VirtualHost *:80>
+	ServerName www.example.com
+	ServerAlias example.com
+	ServerAdmin webmaster@example.com
+
+	WSGIScriptAlias /cal /srv/http/caldav-to-gtasks/server.py
+
+	<Directory /srv/http/caldav-to-gtasks/>
+		AuthType Basic
+		AuthName "WSGI"
+		AuthUserFile /etc/httpd/passwd/passwords
+		Require user USERNAME
+		Order allow,deny
+		Allow from all
+	</Directory>
+</VirtualHost>
+
+Once you've got that you'll need to visit localhost/cal?oauth=1 and give it you're OAuth credentials.
+
+I've only tested it on my iPod Touch CalDav client, but I'm hoping all iOS devices work the same way.
+
+So: Settings -> Mail, Contacts, and Calendars -> Add Account -> Other -> Add CalDav Account
+
+Type your credentials in (if you don't have a user name and password just but in dummy ones) and hit next. At first it will fail, then tap 'Advanced Settings' and set Use SSL to OFF. Set port to the port you've got apache running and make 'Account URL' be something like if you set the WSGIScriptAlias to /cal:
+
+http://192.168.1.2:80/cal
