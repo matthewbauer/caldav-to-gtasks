@@ -1,0 +1,7 @@
+
+* Python 2.7
+* Google Python API Client (http://code.google.com/p/google-api-python-client/)
+* iCalendar Python Library (http://codespeak.net/icalendar/)
+* Apache and mod_wsgi
+  * any WSGI framework will work
+

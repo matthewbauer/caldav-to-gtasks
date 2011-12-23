@@ -1,0 +1,18 @@
+# example Apache config
+
+<VirtualHost *:80>
+	ServerName www.example.com
+	ServerAlias example.com
+	ServerAdmin webmaster@example.com
+
+	WSGIScriptAlias /cal /usr/local/share/caldav-to-gtasks/server.py
+
+	<Directory /usr/local/share/caldav-to-gtasks>
+		AuthType Basic
+		AuthName "WSGI"
+		AuthUserFile /etc/httpd/passwd/passwords
+		Require user matthew
+		Order allow,deny
+		Allow from all
+	</Directory>
+</VirtualHost>
