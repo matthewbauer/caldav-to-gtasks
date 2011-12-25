@@ -1,4 +1,14 @@
+#!/usr/bin/env python
+
 import re
+import random
+import string
+import xml.etree.ElementTree
+#import http.client
+import httplib
+import httplib2
+import urllib
+import urlparse
 
 import apiclient.discovery
 import apiclient.oauth
@@ -8,17 +18,11 @@ import oauth2client.tools
 import gflags
 
 import wsgiref.util
-import xml.etree.ElementTree
-#import http.client
-import httplib
-import httplib2
-
-import urllib
-import urlparse
+import wsgiref.simple_server
 
 # config
 tasklist_id = '@default'
-auth_storage = '/tmp/tasks.dat'
+tmp_dir = '/tmp'
 
 namespaces = {}
 
@@ -253,13 +257,12 @@ prop_functions = {
 	'getetag': getetag,
 }
 
-def propfind(environ, start_response, service):
-	headers = []
+def propfind(environ, start_response, headers, service):
 	headers.append(('Content-Type', 'application/xml; charset="utf-8"'))
 	input = environ['wsgi.input']
 	data = input.read()
 	if not data:
-		start_response(_response(400), [])
+		start_response(_response(400), headers)
 		return ['error']
 
 	root = xml.etree.ElementTree.fromstring(data)
@@ -314,8 +317,7 @@ def propfind(environ, start_response, service):
 	data = _pretty_xml(multistatus)
 	return [data]
 
-def put(environ, start_response, service):
-	headers = []
+def put(environ, start_response, headers, service):
 	headers.append(('Content-Length', '0'))
 	resource = environ['PATH_INFO']
 	if resource == '':
@@ -351,25 +353,23 @@ def put(environ, start_response, service):
 
 	return ['']
 
-def delete(environ, start_response, service):
+def delete(environ, start_response, headers, service):
 	if environ['PATH_INFO'] != '/' and environ['PATH_INFO'] != '':
-		headers = []
 		headers.append(('Content-Length', '0'))
 		task_id = environ['PATH_INFO'].split('/')[1]
 		result = service.tasks().delete(tasklist=tasklist_id, task=task_id).execute()
 		if not 'error' in result:
-			start_response(_response(httplib.INTERNAL_SERVER_ERROR), [])
+			start_response(_response(httplib.INTERNAL_SERVER_ERROR), headers)
 			return ['SUCCESS']
 		else:
-			start_response(_response(httplib.INTERNAL_SERVER_ERROR), [])
+			start_response(_response(httplib.INTERNAL_SERVER_ERROR), headers)
 			return ['FAILURE']
 	else:
-		start_response(_response(httplib.INTERNAL_SERVER_ERROR), [])
+		start_response(_response(httplib.INTERNAL_SERVER_ERROR), headers)
 		return ['NOT SUPPORTED']
 
-def get(environ, start_response, service):
+def get(environ, start_response, headers, service):
 	if environ['PATH_INFO'] != '/' and environ['PATH_INFO'] != '':
-		headers = []
 		headers.append(('Content-Type', 'text/calendar'))
 		task_id = environ['PATH_INFO'].split('/')[1]
 		task = service.tasks().get(tasklist=tasklist_id, task=task_id).execute()
@@ -379,23 +379,22 @@ def get(environ, start_response, service):
 		start_response(_response(httplib.OK), headers)
 		return [event.as_string()]
 	else:
-		start_response(_response(httplib.INTERNAL_SERVER_ERROR), [])
+		start_response(_response(httplib.INTERNAL_SERVER_ERROR), headers)
 		return ['NOT SUPPORTED']
 
-def options(environ, start_response, service):
-	headers = []
+def options(environ, start_response, headers, service):
 	headers.append(('Allow', ', '.join(methods.keys())))
 	headers.append(('DAV', '1, 2, access-control, calendar-access'))
 	headers.append(('Content-Length', '0'))
 	start_response(_response(httplib.NO_CONTENT), headers)
 	return ['']
 
-def report(environ, start_response, service):
+def report(environ, start_response, headers, service):
 	if environ['PATH_INFO'] != '/':
-		start_response(_response(httplib.METHOD_NOT_ALLOWED), [])
+		start_response(_response(httplib.METHOD_NOT_ALLOWED), headers)
 		return ['ERROR!!!']
 
-	start_response(_response(httplib.OK), [])
+	start_response(_response(httplib.OK), headers)
 
 	input = environ['wsgi.input']
 	data = input.read()
@@ -455,13 +454,29 @@ methods = {
 }
 
 def application(environ, start_response, exc_info=None):
+	auth_storage = None
+
+	headers = []
+
+	uid = None
+	if 'HTTP_COOKIE' in environ:
+		fields = environ['HTTP_COOKIE'].split('; ')
+		for field in fields:
+			key, value = field.split('=')
+			if key == 'uid':
+				uid = value
+
+	if not uid:
+		uid = ''.join(random.choice(string.ascii_lowercase) for x in range(32))
+		headers.append(('Set-Cookie', '%s=%s' % ('uid', uid)))
+
+	auth_storage = '%s/%s.dat' % (tmp_dir, uid)
+
 	flow = oauth2client.client.OAuth2WebServerFlow(
 		client_id='555352022035-d09npv5ih7mf9v8e7t53m5db76ll5aof.apps.googleusercontent.com',
 		client_secret='KwvtlxMblJwGWsjidXbDklIx',
 		scope='https://www.googleapis.com/auth/tasks',
 		user_agent='caldav to gtasks/1')
-
-	storage = oauth2client.file.Storage(auth_storage)
 
 	query = dict(urlparse.parse_qsl(environ['QUERY_STRING']))
 
@@ -472,15 +487,14 @@ def application(environ, start_response, exc_info=None):
 			or environ['QUERY_STRING'] == 'oauth':
 #		print >> environ['wsgi.errors'], environ
 		url = flow.step1_get_authorize_url(redirect_uri)
-		headers = []
 		headers.append(('Location', url))
 		start_response(_response(httplib.TEMPORARY_REDIRECT), headers)
 		return ['oauth authentication required']
 	elif 'oauth' in query and query['oauth'] == '2':
-		headers = []
 		flow.redirect_uri = redirect_uri
 		try:
 			credential = flow.step2_exchange(query['code'])
+			storage = oauth2client.file.Storage(auth_storage)
 			storage.put(credential)
 			credential.set_store(storage)
 			start_response(_response(httplib.NO_CONTENT), headers)
@@ -490,10 +504,10 @@ def application(environ, start_response, exc_info=None):
 			start_response(_response(httplib.TEMPORARY_REDIRECT), headers)
 			return ['oauth failed']
 
+	storage = oauth2client.file.Storage(auth_storage)
 	credential = storage.get()
 
 	if credential is None or credential.invalid == True:
-		headers = []
 		start_response(_response(httplib.UNAUTHORIZED), headers)
 		return ['cannot authenticate with Google Tasks, visit %s?oauth=1' %
 				environ['SCRIPT_NAME']]
@@ -507,12 +521,17 @@ def application(environ, start_response, exc_info=None):
 	method = environ['REQUEST_METHOD']
 	if method in methods:
 		try:
-			return methods[method](environ, start_response, service)
+			return methods[method](environ, start_response, headers, service)
 		except(oauth2client.client.AccessTokenRefreshError):
-			start_response(_response(httplib.UNAUTHORIZED), [])
+			start_response(_response(httplib.UNAUTHORIZED), headers)
 			return ['revisit %s?oauth=1' % environ['SCRIPT_NAME']]
 	else:
 		print >> environ['wsgi.errors'], '%s is not allowed' % method
-		start_response(_response(httplib.METHOD_NOT_ALLOWED), [])
+		start_response(_response(httplib.METHOD_NOT_ALLOWED), headers)
 		return ['%s not allowed' % method]
+
+if __name__ == '__main__':
+	httpd = wsgiref.simple_server.make_server('', 8000, application)
+	print('Serving on port 8000)')
+	httpd.server_forever()
 
