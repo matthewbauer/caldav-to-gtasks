@@ -4,11 +4,12 @@ import re
 import random
 import string
 import xml.etree.ElementTree
-#import http.client
 import httplib
 import httplib2
 import urllib
 import urlparse
+import md5
+import base64
 
 import apiclient.discovery
 import apiclient.oauth
@@ -27,7 +28,6 @@ tmp_dir = '/tmp'
 namespaces = {}
 
 def add_namespace(key, namespace):
-#	xml.etree.ElementTree.register_namespace("" if key == 'D' else key, namespace)
 	xml.etree.ElementTree.register_namespace(key, namespace)
 	namespaces[key] = namespace
 
@@ -38,6 +38,7 @@ add_namespace('CS', 'http://calendarserver.org/ns/')
 add_namespace('AP', 'http://apple.com/ns/ical/')
 
 prefix_syntax = re.compile('{(.*)}(.*)')
+digest_syntax = re.compile('^Digest (.*)')
 
 statvalues = {
 	'needsAction': 'NEEDS-ACTION',
@@ -81,11 +82,10 @@ def resourcetype(element, environ, service):
 		element.append(resourcetype)
 	return element
 
-def webdav_set(element, environ, service):
-	if service['kind'] == 'tasks#taskList':
-		href = xml.etree.ElementTree.Element(_tag('D', 'principal-collection-set'))
-		href.text = environ['SCRIPT_NAME']
-		element.append(href)
+def script_name(element, environ, service):
+	href = xml.etree.ElementTree.Element(_tag('D', 'href'))
+	href.text = environ['SCRIPT_NAME']
+	element.append(href)
 	return element
 
 def displayname(element, environ, service):
@@ -97,6 +97,12 @@ def principal_url(element, environ, service):
 	href.text = environ['SCRIPT_NAME']
 	return element
 
+def webdav_set(element, environ, service):
+	if service['kind'] == 'tasks#taskList':
+		href = xml.etree.ElementTree.Element(_tag('D', 'principal-collection-set'))
+		href.text = environ['SCRIPT_NAME']
+		element.append(href)
+
 def supported_report_set(element, environ, service):
 	for report_name in ("principal-property-search", "sync-collection"
 			"expand-property", "principal-search-property-set"):
@@ -107,93 +113,12 @@ def supported_report_set(element, environ, service):
 		element.append(supported)
 	return element
 
-def executable(element, environ, service):
-#	element.text = 'F'
-#	return element
-	return
-
 def getlastmodified(element, environ, service):
 	if service['kind'] == 'tasks#task':
 		element.text = service['updated']
 		return element
 	else:
-		return element
-
-def getcontentlength(element, environ, service):
-	return
-
-def checked_in(element, environ, service):
-	return
-
-def checked_out(element, environ, service):
-	return
-
-def schedule_inbox_url(element, environ, service):
-	return
-
-def schedule_outbox_url(element, environ, service):
-	return
-
-def dropbox_home_url(element, environ, service):
-	return
-
-def notification_url(element, environ, service):
-	return
-
-def source(element, environ, service):
-	return
-
-def pushkey(element, environ, service):
-	return
-
-def push_transports(element, environ, service):
-	return
-
-def owner(element, environ, service):
-	return
-
-def subscribed_strip_attachments(element, environ, service):
-	return
-
-def subscribed_strip_alarms(element, environ, service):
-	return
-
-def subscribed_strip_todos(element, environ, service):
-	return
-
-def current_user_privilege_set(element, environ, service):
-	return
-
-def calendar_timezone(element, environ, service):
-	return
-
-def quota_used_bytes(element, environ, service):
-	return
-
-def quota_available_bytes(element, environ, service):
-	return
-
-def schedule_default_calendar_url(element, environ, service):
-	return
-
-def schedule_calendar_url(element, environ, service):
-	return
-
-def schedule_calendar_transp(element, environ, service):
-	return
-
-def calendar_free_busy_set(element, environ, service):
-	return
-
-def supported_calendar_component_set(element, environ, service):
-	return
-
-def calendar_order(element, environ, service):
-	return
-
-def calendar_color(element, environ, service):
-	element.text = 'blue'
-	return element
+		return
 
 def calendar_description(element, environ, service):
 	element.text = service['title']
@@ -204,54 +129,23 @@ def getetag(element, environ, service):
 	return element
 
 prop_functions = {
-#	rfc4918 (webdav)
+#	rfc 4918 (webdav)
 	'resourcetype': resourcetype,
-	'getcontentlength': getcontentlength,
 	'getlastmodified': getlastmodified,
 	'displayname': displayname,
 
 #	rfc 3744 (webdav access control)
-	'principal-collection-set': webdav_set,
 	'principal-URL': principal_url,
+	'principal-collection-set': webdav_set,
 
 #	ietf draft desruisseaux-caldav-sched (extension to rfc4918)
 	'calendar-home-set': webdav_set,
 	'calendar-user-address-set': webdav_set,
-	'schedule-inbox-URL': schedule_inbox_url,
-	'schedule-outbox-URL': schedule_outbox_url,
 
-#	rfc 3253 (webdav versioning)
-	'checked-in': checked_in,
-	'checked-out': checked_out,
 	'supported-report-set': supported_report_set,
-
-#	webdav.org/mod_dav
-	'executable': executable,
-
-#	calendarserver.org
-	'dropbox-home-URL': dropbox_home_url,
-	'notification-URL': notification_url,
-
-	'owner': owner,
-	'push-transports': push_transports,
-	'pushkey': pushkey,
-	'source': source,
-
-	'subscribed-strip-attachments': subscribed_strip_attachments,
-	'subscribed-strip-alarms': subscribed_strip_attachments,
-	'subscribed-strip-todos': subscribed_strip_todos,
-	'current-user-privilege-set': current_user_privilege_set,
-	'quota-used-bytes': quota_used_bytes,
-	'quota-available-bytes': quota_available_bytes,
-
-	'schedule-default-calendar-URL': schedule_default_calendar_url,
-	'schedule-calendar-transp': schedule_calendar_transp,
-	'supported-calendar-component-set': supported_calendar_component_set,
-
-	'calendar-timezone': calendar_timezone,
-	'calendar-free-busy-set': calendar_free_busy_set,
+	'current-user-privilege-set': script_name,
+	'schedule-default-calendar-URL': script_name,
 	'calendar-description': calendar_description,
-	'calendar-color': calendar_color,
 
 	'getctag': getetag,
 	'getetag': getetag,
@@ -454,23 +348,9 @@ methods = {
 }
 
 def application(environ, start_response, exc_info=None):
-	auth_storage = None
-
 	headers = []
 
-	uid = None
-	if 'HTTP_COOKIE' in environ:
-		fields = environ['HTTP_COOKIE'].split('; ')
-		for field in fields:
-			key, value = field.split('=')
-			if key == 'uid':
-				uid = value
-
-	if not uid:
-		uid = ''.join(random.choice(string.ascii_lowercase) for x in range(32))
-		headers.append(('Set-Cookie', '%s=%s' % ('uid', uid)))
-
-	auth_storage = '%s/%s.dat' % (tmp_dir, uid)
+	path = environ['SCRIPT_NAME'] + environ['PATH_INFO']
 
 	flow = oauth2client.client.OAuth2WebServerFlow(
 		client_id='555352022035-d09npv5ih7mf9v8e7t53m5db76ll5aof.apps.googleusercontent.com',
@@ -478,39 +358,41 @@ def application(environ, start_response, exc_info=None):
 		scope='https://www.googleapis.com/auth/tasks',
 		user_agent='caldav to gtasks/1')
 
+	redirect_uri = '%s://%s%s?oauth=2' % (environ['wsgi.url_scheme'], \
+		environ['SERVER_NAME'], path)
+
 	query = dict(urlparse.parse_qsl(environ['QUERY_STRING']))
 
-	redirect_uri = '%s://%s%s?oauth=2' % (environ['wsgi.url_scheme'], \
-			environ['SERVER_NAME'], environ['SCRIPT_NAME'])
+	identifier = 'tasks' # terribly insecure
 
-	if ('oauth' in query and query['oauth'] == '1') \
-			or environ['QUERY_STRING'] == 'oauth':
-#		print >> environ['wsgi.errors'], environ
-		url = flow.step1_get_authorize_url(redirect_uri)
-		headers.append(('Location', url))
-		start_response(_response(httplib.TEMPORARY_REDIRECT), headers)
-		return ['oauth authentication required']
-	elif 'oauth' in query and query['oauth'] == '2':
-		flow.redirect_uri = redirect_uri
-		try:
-			credential = flow.step2_exchange(query['code'])
-			storage = oauth2client.file.Storage(auth_storage)
-			storage.put(credential)
-			credential.set_store(storage)
-			start_response(_response(httplib.NO_CONTENT), headers)
-			return ['oauth successful']
-		except oauth2client.client.FlowExchangeError:
-			headers.append(('Location', '%s?oauth=1' % environ['SCRIPT_NAME']))
+	auth_storage = '%s/%s.dat' % (tmp_dir, identifier)
+
+	if 'oauth' in query:
+		if query['oauth'] == '1':
+			url = flow.step1_get_authorize_url(redirect_uri)
+			headers.append(('Location', url))
 			start_response(_response(httplib.TEMPORARY_REDIRECT), headers)
-			return ['oauth failed']
+			return ['oauth authentication required - %s?oauth=2' % path]
+		elif query['oauth'] == '2':
+			flow.redirect_uri = redirect_uri
+			try:
+				credential = flow.step2_exchange(query['code'])
+				storage = oauth2client.file.Storage(auth_storage)
+				storage.put(credential)
+				credential.set_store(storage)
+				start_response(_response(httplib.NO_CONTENT), headers)
+				return ['oauth successful']
+			except oauth2client.client.FlowExchangeError:
+				headers.append(('Location', '%s?oauth=1' % path))
+				start_response(_response(httplib.TEMPORARY_REDIRECT), headers)
+				return ['oauth failed']
 
 	storage = oauth2client.file.Storage(auth_storage)
 	credential = storage.get()
 
 	if credential is None or credential.invalid == True:
 		start_response(_response(httplib.UNAUTHORIZED), headers)
-		return ['cannot authenticate with Google Tasks, visit %s?oauth=1' %
-				environ['SCRIPT_NAME']]
+		return ['cannot authenticate with Google Tasks, visit %s?oauth=1' % path]
 
 	http = httplib2.Http()
 	http = credential.authorize(http)
@@ -524,7 +406,7 @@ def application(environ, start_response, exc_info=None):
 			return methods[method](environ, start_response, headers, service)
 		except(oauth2client.client.AccessTokenRefreshError):
 			start_response(_response(httplib.UNAUTHORIZED), headers)
-			return ['revisit %s?oauth=1' % environ['SCRIPT_NAME']]
+			return ['revisit %s?oauth=1' % path]
 	else:
 		print >> environ['wsgi.errors'], '%s is not allowed' % method
 		start_response(_response(httplib.METHOD_NOT_ALLOWED), headers)
@@ -533,5 +415,5 @@ def application(environ, start_response, exc_info=None):
 if __name__ == '__main__':
 	httpd = wsgiref.simple_server.make_server('', 8000, application)
 	print('Serving on port 8000)')
-	httpd.server_forever()
+	httpd.serve_forever()
 
