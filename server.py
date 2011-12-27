@@ -5,18 +5,17 @@ import random
 import string
 import xml.etree.ElementTree
 import httplib
-import httplib2
 import urllib
 import urlparse
 import md5
 import base64
 
+import httplib2
 import apiclient.discovery
 import apiclient.oauth
 import icalendar
 import oauth2client.file
 import oauth2client.tools
-import gflags
 
 import wsgiref.util
 import wsgiref.simple_server
@@ -24,6 +23,8 @@ import wsgiref.simple_server
 # config
 tasklist_id = '@default'
 tmp_dir = '/tmp'
+client_id='555352022035-d09npv5ih7mf9v8e7t53m5db76ll5aof.apps.googleusercontent.com'
+client_secret='KwvtlxMblJwGWsjidXbDklIx'
 
 namespaces = {}
 
@@ -38,7 +39,6 @@ add_namespace('CS', 'http://calendarserver.org/ns/')
 add_namespace('AP', 'http://apple.com/ns/ical/')
 
 prefix_syntax = re.compile('{(.*)}(.*)')
-digest_syntax = re.compile('^Digest (.*)')
 
 statvalues = {
 	'needsAction': 'NEEDS-ACTION',
@@ -72,7 +72,7 @@ def _pretty_xml(element, level=0):
 			element.tail = i
 	if not level:
 		return ('<?xml version="1.0"?>\n' + xml.etree.ElementTree.tostring(
-			element, 'utf-8').decode('utf-8')).encode('utf-8')
+			element))
 
 def resourcetype(element, environ, service):
 	if service['kind'] == 'tasks#taskList':
@@ -151,13 +151,13 @@ prop_functions = {
 	'getetag': getetag,
 }
 
-def propfind(environ, start_response, headers, service):
-	headers.append(('Content-Type', 'application/xml; charset="utf-8"'))
+def propfind(environ, service):
+	headers = []
+
 	input = environ['wsgi.input']
 	data = input.read()
 	if not data:
-		start_response(_response(400), headers)
-		return ['error']
+		return 'ERROR', httplib.INTERNAL_SERVER_ERROR, headers
 
 	root = xml.etree.ElementTree.fromstring(data)
 
@@ -207,15 +207,14 @@ def propfind(environ, start_response, headers, service):
 		response.append(propstat)
 		multistatus.append(response)
 
-	start_response(_response(httplib.MULTI_STATUS), headers)
-	data = _pretty_xml(multistatus)
-	return [data]
+	headers.append(('Content-Type', 'application/xml'))
+	return _pretty_xml(multistatus, httplib.MULTI_STATUS, headers)
 
-def put(environ, start_response, headers, service):
-	headers.append(('Content-Length', '0'))
+def put(environ, service):
+	headers = []
 	resource = environ['PATH_INFO']
 	if resource == '':
-		return ['']
+		return '', httplib.INTERNAL_SERVER_ERROR, headers
 	input = environ['wsgi.input']
 	data = input.read()
 
@@ -231,8 +230,7 @@ def put(environ, start_response, headers, service):
 	tasks = service.tasks().list(tasklist=tasklist_id).execute()
 	for task in tasks['items']:
 		if task['title'] == summary:
-			start_response(_response(httplib.CONFLICT), headers)
-			return ['']
+			return 'CONFLIG', httplib.CONFLICT, headers
 
 	task = {
 		'title': summary,
@@ -241,28 +239,25 @@ def put(environ, start_response, headers, service):
 
 	result = service.tasks().insert(tasklist=tasklist_id, body=task).execute()
 	if result:
-		start_response(_response(httplib.CREATED), headers)
+		return 'CREATED', httplib.CREATED, headers
 	else:
-		start_response(_response(httplib.INTERNAL_SERVER_ERROR), headers)
+		return 'ERROR', httplib.INTERNAL_SERVER_ERROR, headers
 
-	return ['']
-
-def delete(environ, start_response, headers, service):
+def delete(environ, service):
+	headers = []
 	if environ['PATH_INFO'] != '/' and environ['PATH_INFO'] != '':
 		headers.append(('Content-Length', '0'))
 		task_id = environ['PATH_INFO'].split('/')[1]
 		result = service.tasks().delete(tasklist=tasklist_id, task=task_id).execute()
 		if not 'error' in result:
-			start_response(_response(httplib.INTERNAL_SERVER_ERROR), headers)
-			return ['SUCCESS']
+			return 'SUCCESS', httplib.OK, headers
 		else:
-			start_response(_response(httplib.INTERNAL_SERVER_ERROR), headers)
-			return ['FAILURE']
+			return 'FAILURE', httplib.INTERNAL_SERVER_ERROR, headers
 	else:
-		start_response(_response(httplib.INTERNAL_SERVER_ERROR), headers)
-		return ['NOT SUPPORTED']
+		return 'NOT SUPPORTED', httplib.INTERNAL_SERVER_ERROR, headers
 
-def get(environ, start_response, headers, service):
+def get(environ, service):
+	headers = []
 	if environ['PATH_INFO'] != '/' and environ['PATH_INFO'] != '':
 		headers.append(('Content-Type', 'text/calendar'))
 		task_id = environ['PATH_INFO'].split('/')[1]
@@ -270,25 +265,22 @@ def get(environ, start_response, headers, service):
 		event = icalendar.Todo()
 		event.add('summary', task['title'])
 		event.add('status', statvalues[task['status']])
-		start_response(_response(httplib.OK), headers)
-		return [event.as_string()]
+		return event.as_string(), httplib.OK, headers
 	else:
-		start_response(_response(httplib.INTERNAL_SERVER_ERROR), headers)
-		return ['NOT SUPPORTED']
+		return 'NOT SUPPORTED', httplib.INTERNAL_SERVER_ERROR, headers
 
-def options(environ, start_response, headers, service):
+def options(environ, service):
+	headers = []
 	headers.append(('Allow', ', '.join(methods.keys())))
 	headers.append(('DAV', '1, 2, access-control, calendar-access'))
 	headers.append(('Content-Length', '0'))
-	start_response(_response(httplib.NO_CONTENT), headers)
-	return ['']
+	return '', httplib.NO_CONTENT, headers
 
-def report(environ, start_response, headers, service):
+def report(environ, service):
+	headers = []
+
 	if environ['PATH_INFO'] != '/':
-		start_response(_response(httplib.METHOD_NOT_ALLOWED), headers)
-		return ['ERROR!!!']
-
-	start_response(_response(httplib.OK), headers)
+		return 'ERROR!!!', httplib.METHOD_NOT_ALLOWED, []
 
 	input = environ['wsgi.input']
 	data = input.read()
@@ -336,7 +328,8 @@ def report(environ, start_response, headers, service):
 
 	multistatus.append(response)
 
-	return ['REPORT']
+	headers.append(('Content-Type', 'application/xml'))
+	return _pretty_xml(multistatus), httplib.OK, []
 
 methods = {
 	'OPTIONS': options,
@@ -349,12 +342,14 @@ methods = {
 
 def application(environ, start_response, exc_info=None):
 	headers = []
+	output = None
+	status = _response(httplib.OK)
 
 	path = environ['SCRIPT_NAME'] + environ['PATH_INFO']
 
 	flow = oauth2client.client.OAuth2WebServerFlow(
-		client_id='555352022035-d09npv5ih7mf9v8e7t53m5db76ll5aof.apps.googleusercontent.com',
-		client_secret='KwvtlxMblJwGWsjidXbDklIx',
+		client_id=client_id,
+		client_secret=client_secret,
 		scope='https://www.googleapis.com/auth/tasks',
 		user_agent='caldav to gtasks/1')
 
@@ -369,10 +364,11 @@ def application(environ, start_response, exc_info=None):
 
 	if 'oauth' in query:
 		if query['oauth'] == '1':
+			print >> environ['wsgi.errors'], redirect_uri
 			url = flow.step1_get_authorize_url(redirect_uri)
 			headers.append(('Location', url))
-			start_response(_response(httplib.TEMPORARY_REDIRECT), headers)
-			return ['oauth authentication required - %s?oauth=2' % path]
+			status = httplib.TEMPORARY_REDIRECT
+			output = 'oauth authentication required - %s?oauth=2' % path
 		elif query['oauth'] == '2':
 			flow.redirect_uri = redirect_uri
 			try:
@@ -380,40 +376,49 @@ def application(environ, start_response, exc_info=None):
 				storage = oauth2client.file.Storage(auth_storage)
 				storage.put(credential)
 				credential.set_store(storage)
-				start_response(_response(httplib.NO_CONTENT), headers)
-				return ['oauth successful']
+				status = httplib.NO_CONTENT
+				output = 'oauth successful'
 			except oauth2client.client.FlowExchangeError:
 				headers.append(('Location', '%s?oauth=1' % path))
-				start_response(_response(httplib.TEMPORARY_REDIRECT), headers)
-				return ['oauth failed']
-
-	storage = oauth2client.file.Storage(auth_storage)
-	credential = storage.get()
-
-	if credential is None or credential.invalid == True:
-		start_response(_response(httplib.UNAUTHORIZED), headers)
-		return ['cannot authenticate with Google Tasks, visit %s?oauth=1' % path]
-
-	http = httplib2.Http()
-	http = credential.authorize(http)
-
-	service = apiclient.discovery.build(serviceName='tasks',
-		version='v1', http=http)
-
-	method = environ['REQUEST_METHOD']
-	if method in methods:
-		try:
-			return methods[method](environ, start_response, headers, service)
-		except(oauth2client.client.AccessTokenRefreshError):
-			start_response(_response(httplib.UNAUTHORIZED), headers)
-			return ['revisit %s?oauth=1' % path]
+				status = httplib.TEMPORARY_REDIRECT
+				output = 'oauth failed'
 	else:
-		print >> environ['wsgi.errors'], '%s is not allowed' % method
-		start_response(_response(httplib.METHOD_NOT_ALLOWED), headers)
-		return ['%s not allowed' % method]
+		storage = oauth2client.file.Storage(auth_storage)
+		credential = storage.get()
+
+		if credential is None or credential.invalid == True:
+			status = httplib.UNAUTHORIZED
+			output = 'cannot authenticate with Google Tasks, visit %s?oauth=1' % path
+		else:
+			http = httplib2.Http()
+			http = credential.authorize(http)
+
+			service = apiclient.discovery.build(serviceName='tasks',
+				version='v1', http=http)
+
+			method = environ['REQUEST_METHOD']
+			if method in methods:
+				try:
+					output, status, new_headers = methods[method](environ, service)
+					headers.extend(new_headers)
+				except(oauth2client.client.AccessTokenRefreshError):
+					status = httplib.UNAUTHORIZED
+					output = 'revisit %s?oauth=1' % path
+			else:
+				print >> environ['wsgi.errors'], '%s is not allowed' % method
+				status = httplib.METHOD_NOT_ALLOWED
+				output = '%s not allowed'
+
+	if 'Content-Type' not in [header[0] for header in headers]:
+		headers.append(('Content-Type', 'text/plain'))
+
+#	if status != httplib.NO_CONTENT:
+	headers.append(('Content-Length', str(len(output))))
+	start_response(_response(status), headers)
+	return [output]
 
 if __name__ == '__main__':
 	httpd = wsgiref.simple_server.make_server('', 8000, application)
-	print('Serving on port 8000)')
+	print('Serving on port 8000')
 	httpd.serve_forever()
 
