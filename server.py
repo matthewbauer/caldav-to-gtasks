@@ -18,7 +18,6 @@ import oauth2client.file
 import oauth2client.tools
 
 import wsgiref.util
-import wsgiref.simple_server
 
 # config
 tasklist_id = '@default'
@@ -72,7 +71,7 @@ def _pretty_xml(element, level=0):
 			element.tail = i
 	if not level:
 		return ('<?xml version="1.0"?>\n' + xml.etree.ElementTree.tostring(
-			element))
+			element) + '\n')
 
 def resourcetype(element, environ, service):
 	if service['kind'] == 'tasks#taskList':
@@ -157,7 +156,7 @@ def propfind(environ, service):
 	input = environ['wsgi.input']
 	data = input.read()
 	if not data:
-		return 'ERROR', httplib.INTERNAL_SERVER_ERROR, headers
+		return 'ERROR\n', httplib.INTERNAL_SERVER_ERROR, headers
 
 	root = xml.etree.ElementTree.fromstring(data)
 
@@ -208,7 +207,7 @@ def propfind(environ, service):
 		multistatus.append(response)
 
 	headers.append(('Content-Type', 'application/xml'))
-	return _pretty_xml(multistatus, httplib.MULTI_STATUS, headers)
+	return _pretty_xml(multistatus), httplib.MULTI_STATUS, headers
 
 def put(environ, service):
 	headers = []
@@ -230,7 +229,7 @@ def put(environ, service):
 	tasks = service.tasks().list(tasklist=tasklist_id).execute()
 	for task in tasks['items']:
 		if task['title'] == summary:
-			return 'CONFLIG', httplib.CONFLICT, headers
+			return 'CONFLICT\n', httplib.CONFLICT, headers
 
 	task = {
 		'title': summary,
@@ -239,9 +238,9 @@ def put(environ, service):
 
 	result = service.tasks().insert(tasklist=tasklist_id, body=task).execute()
 	if result:
-		return 'CREATED', httplib.CREATED, headers
+		return 'CREATED\n', httplib.CREATED, headers
 	else:
-		return 'ERROR', httplib.INTERNAL_SERVER_ERROR, headers
+		return 'ERROR\n', httplib.INTERNAL_SERVER_ERROR, headers
 
 def delete(environ, service):
 	headers = []
@@ -250,11 +249,11 @@ def delete(environ, service):
 		task_id = environ['PATH_INFO'].split('/')[1]
 		result = service.tasks().delete(tasklist=tasklist_id, task=task_id).execute()
 		if not 'error' in result:
-			return 'SUCCESS', httplib.OK, headers
+			return 'SUCCESS\n', httplib.OK, headers
 		else:
-			return 'FAILURE', httplib.INTERNAL_SERVER_ERROR, headers
+			return 'FAILURE\n', httplib.INTERNAL_SERVER_ERROR, headers
 	else:
-		return 'NOT SUPPORTED', httplib.INTERNAL_SERVER_ERROR, headers
+		return 'NOT SUPPORTED\n', httplib.INTERNAL_SERVER_ERROR, headers
 
 def get(environ, service):
 	headers = []
@@ -265,9 +264,9 @@ def get(environ, service):
 		event = icalendar.Todo()
 		event.add('summary', task['title'])
 		event.add('status', statvalues[task['status']])
-		return event.as_string(), httplib.OK, headers
+		return event.as_string() + '\n', httplib.OK, headers
 	else:
-		return 'NOT SUPPORTED', httplib.INTERNAL_SERVER_ERROR, headers
+		return 'NOT SUPPORTED\n', httplib.INTERNAL_SERVER_ERROR, headers
 
 def options(environ, service):
 	headers = []
@@ -280,7 +279,7 @@ def report(environ, service):
 	headers = []
 
 	if environ['PATH_INFO'] != '/':
-		return 'ERROR!!!', httplib.METHOD_NOT_ALLOWED, []
+		return 'ERROR\n', httplib.METHOD_NOT_ALLOWED, []
 
 	input = environ['wsgi.input']
 	data = input.read()
@@ -329,7 +328,7 @@ def report(environ, service):
 	multistatus.append(response)
 
 	headers.append(('Content-Type', 'application/xml'))
-	return _pretty_xml(multistatus), httplib.OK, []
+	return _pretty_xml(multistatus), httplib.OK, headers
 
 methods = {
 	'OPTIONS': options,
@@ -368,7 +367,7 @@ def application(environ, start_response, exc_info=None):
 			url = flow.step1_get_authorize_url(redirect_uri)
 			headers.append(('Location', url))
 			status = httplib.TEMPORARY_REDIRECT
-			output = 'oauth authentication required - %s?oauth=2' % path
+			output = 'oauth authentication required - %s?oauth=2\n' % path
 		elif query['oauth'] == '2':
 			flow.redirect_uri = redirect_uri
 			try:
@@ -377,18 +376,18 @@ def application(environ, start_response, exc_info=None):
 				storage.put(credential)
 				credential.set_store(storage)
 				status = httplib.NO_CONTENT
-				output = 'oauth successful'
+				output = 'oauth successful\n'
 			except oauth2client.client.FlowExchangeError:
 				headers.append(('Location', '%s?oauth=1' % path))
 				status = httplib.TEMPORARY_REDIRECT
-				output = 'oauth failed'
+				output = 'oauth failed\n'
 	else:
 		storage = oauth2client.file.Storage(auth_storage)
 		credential = storage.get()
 
 		if credential is None or credential.invalid == True:
 			status = httplib.UNAUTHORIZED
-			output = 'cannot authenticate with Google Tasks, visit %s?oauth=1' % path
+			output = 'cannot authenticate with Google Tasks, visit %s?oauth=1\n' % path
 		else:
 			http = httplib2.Http()
 			http = credential.authorize(http)
@@ -403,11 +402,11 @@ def application(environ, start_response, exc_info=None):
 					headers.extend(new_headers)
 				except(oauth2client.client.AccessTokenRefreshError):
 					status = httplib.UNAUTHORIZED
-					output = 'revisit %s?oauth=1' % path
+					output = 'revisit %s?oauth=1\n' % path
 			else:
 				print >> environ['wsgi.errors'], '%s is not allowed' % method
 				status = httplib.METHOD_NOT_ALLOWED
-				output = '%s not allowed'
+				output = '%s not allowed\n'
 
 	if 'Content-Type' not in [header[0] for header in headers]:
 		headers.append(('Content-Type', 'text/plain'))
@@ -418,6 +417,7 @@ def application(environ, start_response, exc_info=None):
 	return [output]
 
 if __name__ == '__main__':
+	import wsgiref.simple_server
 	httpd = wsgiref.simple_server.make_server('', 8000, application)
 	print('Serving on port 8000')
 	httpd.serve_forever()
