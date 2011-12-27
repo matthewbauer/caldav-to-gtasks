@@ -412,8 +412,8 @@ def application(environ, start_response, exc_info=None):
 	if 'Content-Type' not in [header[0] for header in headers]:
 		headers.append(('Content-Type', 'text/plain'))
 
-#	if status != httplib.NO_CONTENT:
 	headers.append(('Content-Length', str(len(output))))
+	headers.append(('Connection', 'close'))
 	start_response(_response(status), headers)
 	return [output]
 
