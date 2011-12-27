@@ -49,17 +49,16 @@ statvalues = {
 httplib.responses[207] = 'Multi-Status'
 
 def _response(code):
-	return "%i %s" % (code, httplib.responses[code])
+	return '%i %s' % (code, httplib.responses[code])
 
 def _tag(namespace, tagname):
 	return '{%s}%s' % (namespaces[namespace], tagname)
 
 def _pretty_xml(element, level=0):
-	"""Indent an ElementTree ``element`` and its children."""
-	i = "\n" + level * "  "
+	i = '\n' + level * '  '
 	if len(element):
 		if not element.text or not element.text.strip():
-			element.text = i + "  "
+			element.text = i + '  '
 		if not element.tail or not element.tail.strip():
 			element.tail = i
 		for sub_element in element:
@@ -70,8 +69,7 @@ def _pretty_xml(element, level=0):
 		if level and (not element.tail or not element.tail.strip()):
 			element.tail = i
 	if not level:
-		return ('<?xml version="1.0"?>\n' + xml.etree.ElementTree.tostring(
-			element) + '\n')
+		return ('<?xml version="1.0"?>\n' + xml.etree.ElementTree.tostring(element) + '\n')
 
 def resourcetype(element, environ, service):
 	if service['kind'] == 'tasks#taskList':
@@ -91,40 +89,54 @@ def displayname(element, environ, service):
 	element.text = service['title']
 	return element
 
-def principal_url(element, environ, service):
-	href = xml.etree.ElementTree.Element(_tag('D', 'href'))
-	href.text = environ['SCRIPT_NAME']
-	return element
-
-def webdav_set(element, environ, service):
-	if service['kind'] == 'tasks#taskList':
-		href = xml.etree.ElementTree.Element(_tag('D', 'principal-collection-set'))
-		href.text = environ['SCRIPT_NAME']
-		element.append(href)
-
 def supported_report_set(element, environ, service):
-	for report_name in ("principal-property-search", "sync-collection"
-			"expand-property", "principal-search-property-set"):
-		supported = xml.etree.ElementTree.Element(_tag("D", "supported-report"))
-		report_tag = xml.etree.ElementTree.Element(_tag("D", "report"))
+	for report_name in ('principal-property-search', 'sync-collection'
+			'expand-property', 'principal-search-property-set'):
+		supported = xml.etree.ElementTree.Element(_tag('D', 'supported-report'))
+		report_tag = xml.etree.ElementTree.Element(_tag('D', 'report'))
 		report_tag.text = report_name
 		supported.append(report_tag)
 		element.append(supported)
 	return element
 
+def supported_calendar_component_set(element, environ, service):
+	for component in ('VTODO', 'VEVENT', 'VJOURNAL'):
+		comp = xml.etree.ElementTree.Element(_tag('C', 'comp'))
+		comp.set('name', component)
+		element.append(comp)
+	return element
+
 def getlastmodified(element, environ, service):
-	if service['kind'] == 'tasks#task':
+	if 'updated' in service:
 		element.text = service['updated']
-		return element
-	else:
-		return
+	return element
 
 def calendar_description(element, environ, service):
 	element.text = service['title']
-	return
+	return element
 
 def getetag(element, environ, service):
 	element.text = service['etag']
+	return element
+
+def current_user_privilege(element, environ, service):
+	href = xml.etree.ElementTree.Element(_tag('D', 'href'))
+	href.text = environ['SCRIPT_NAME']
+	element.append(href)
+	return element
+
+def current_user_privilege_set(element, environ, service):
+	privilege = xml.etree.ElementTree.Element(_tag('D', 'privilege'))
+	all = xml.etree.ElementTree.Element(_tag('D', 'all'))
+	privilege.append(all)
+	element.append(privilege)
+	return element
+
+def owner(element, environ, service):
+	element.text = environ['SCRIPT_NAME']
+	return element
+
+def calendar_timezone(element, environ, service):
 	return element
 
 prop_functions = {
@@ -133,21 +145,25 @@ prop_functions = {
 	'getlastmodified': getlastmodified,
 	'displayname': displayname,
 
-#	rfc 3744 (webdav access control)
-	'principal-URL': principal_url,
-	'principal-collection-set': webdav_set,
-
-#	ietf draft desruisseaux-caldav-sched (extension to rfc4918)
-	'calendar-home-set': webdav_set,
-	'calendar-user-address-set': webdav_set,
-
-	'supported-report-set': supported_report_set,
-	'current-user-privilege-set': script_name,
-	'schedule-default-calendar-URL': script_name,
-	'calendar-description': calendar_description,
-
 	'getctag': getetag,
 	'getetag': getetag,
+	'owner': owner,
+
+#	rfc 3744 (webdav access control)
+	'principal-URL': script_name,
+	'principal-collection-set': script_name,
+
+#	ietf draft desruisseaux-caldav-sched (extension to rfc4918)
+	'calendar-home-set': script_name,
+	'calendar-user-address-set': script_name,
+	'calendar-timezone': calendar_timezone,
+	'calendar-description': calendar_description,
+	'supported-calendar-component-set': supported_calendar_component_set,
+	'schedule-default-calendar-URL': script_name,
+
+	'supported-report-set': supported_report_set,
+	'current-user-privilege': current_user_privilege,
+	'current-user-privilege-set': current_user_privilege_set,
 }
 
 def propfind(environ, service):
@@ -156,22 +172,40 @@ def propfind(environ, service):
 	input = environ['wsgi.input']
 	data = input.read()
 	if not data:
-		return 'ERROR\n', httplib.INTERNAL_SERVER_ERROR, headers
+		return 'ERROR1\n', httplib.INTERNAL_SERVER_ERROR, headers
 
 	root = xml.etree.ElementTree.fromstring(data)
 
-	props = root.find(_tag('D', 'prop')).getchildren()
+	main_prop = root.find(_tag('D', 'prop'))
+	if main_prop is None:
+		return 'ERROR2\n', httplib.INTERNAL_SERVER_ERROR, headers
+
+	props = main_prop.getchildren()
+
 
 	multistatus = xml.etree.ElementTree.Element(_tag('D', 'multistatus'))
 
-	if environ['PATH_INFO'] == '/':
+	is_tasklist = False
+
+	containers = []
+
+	if environ['PATH_INFO'] == '/' or environ['PATH_INFO'] == '' or environ['PATH_INFO'].startswith('/principals'):
+		is_tasklist = True
+	else:
+		task_id = environ['PATH_INFO'].split('/')[1]
+		try:
+			task = service.tasks().get(tasklist=tasklist_id, task=task_id).execute()
+			if not task:
+				is_tasklist = True
+			else:
+				containers = [task]
+		except(apiclient.http.HttpError):
+			is_tasklist = True
+
+	if is_tasklist:
 		tasklist = service.tasklists().get(tasklist=tasklist_id).execute()
 		tasks = service.tasks().list(tasklist=tasklist_id).execute()
 		containers = [tasklist] + tasks['items']
-	else:
-		task_id = environ['PATH_INFO'].split('/')[1]
-		task = service.tasks().get(tasklist=tasklist_id, task=task_id).execute()
-		containers = [task]
 
 	for container in containers:
 		response = xml.etree.ElementTree.Element(_tag('D', 'response'))
@@ -193,11 +227,11 @@ def propfind(environ, service):
 			if propname in prop_functions:
 				element = prop_functions[propname](element, environ, container)
 			else:
-				element = None
 				print >> environ['wsgi.errors'], 'no method for %s' % propname
 			if element is not None:
 				prop_element.append(element)
 			else:
+				prop_element.append(xml.etree.ElementTree.Element(prop.tag))
 				print >> environ['wsgi.errors'], 'no method for %s' % propname
 		propstat.append(prop_element)
 		status = xml.etree.ElementTree.Element(_tag('D', 'status'))
@@ -213,7 +247,7 @@ def put(environ, service):
 	headers = []
 	resource = environ['PATH_INFO']
 	if resource == '':
-		return '', httplib.INTERNAL_SERVER_ERROR, headers
+		return 'ERROR3', httplib.INTERNAL_SERVER_ERROR, headers
 	input = environ['wsgi.input']
 	data = input.read()
 
@@ -240,7 +274,7 @@ def put(environ, service):
 	if result:
 		return 'CREATED\n', httplib.CREATED, headers
 	else:
-		return 'ERROR\n', httplib.INTERNAL_SERVER_ERROR, headers
+		return 'ERROR4\n', httplib.INTERNAL_SERVER_ERROR, headers
 
 def delete(environ, service):
 	headers = []
@@ -251,7 +285,7 @@ def delete(environ, service):
 		if not 'error' in result:
 			return 'SUCCESS\n', httplib.OK, headers
 		else:
-			return 'FAILURE\n', httplib.INTERNAL_SERVER_ERROR, headers
+			return 'ERROR5\n', httplib.INTERNAL_SERVER_ERROR, headers
 	else:
 		return 'NOT SUPPORTED\n', httplib.INTERNAL_SERVER_ERROR, headers
 
@@ -279,7 +313,7 @@ def report(environ, service):
 	headers = []
 
 	if environ['PATH_INFO'] != '/':
-		return 'ERROR\n', httplib.METHOD_NOT_ALLOWED, []
+		return 'ERROR6\n', httplib.METHOD_NOT_ALLOWED, []
 
 	input = environ['wsgi.input']
 	data = input.read()
@@ -352,8 +386,7 @@ def application(environ, start_response, exc_info=None):
 		scope='https://www.googleapis.com/auth/tasks',
 		user_agent='caldav to gtasks/1')
 
-	redirect_uri = '%s://%s%s?oauth=2' % (environ['wsgi.url_scheme'], \
-		environ['SERVER_NAME'], path)
+	redirect_uri = '%s://%s%s?oauth=2' % (environ['wsgi.url_scheme'], environ['SERVER_NAME'], path)
 
 	query = dict(urlparse.parse_qsl(environ['QUERY_STRING']))
 
@@ -414,6 +447,7 @@ def application(environ, start_response, exc_info=None):
 	headers.append(('Content-Length', str(len(output))))
 	headers.append(('Connection', 'close'))
 	start_response(_response(status), headers)
+	print >> environ['wsgi.errors'], output
 	return [output]
 
 if __name__ == '__main__':
