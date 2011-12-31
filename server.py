@@ -54,23 +54,6 @@ def _response(code):
 def _tag(namespace, tagname):
 	return '{%s}%s' % (namespaces[namespace], tagname)
 
-def _pretty_xml(element, level=0):
-	i = '\n' + level * '  '
-	if len(element):
-		if not element.text or not element.text.strip():
-			element.text = i + '  '
-		if not element.tail or not element.tail.strip():
-			element.tail = i
-		for sub_element in element:
-			_pretty_xml(sub_element, level + 1)
-		if not sub_element.tail or not sub_element.tail.strip():
-			sub_element.tail = i
-	else:
-		if level and (not element.tail or not element.tail.strip()):
-			element.tail = i
-	if not level:
-		return ('<?xml version="1.0"?>\n' + xml.etree.ElementTree.tostring(element) + '\n')
-
 def resourcetype(element, environ, service):
 	if service['kind'] == 'tasks#taskList':
 		collection = xml.etree.ElementTree.Element(_tag('D', 'collection'))
@@ -79,9 +62,9 @@ def resourcetype(element, environ, service):
 		element.append(resourcetype)
 	return element
 
-def script_name(element, environ, service):
+def calendar_href(element, environ, service):
 	href = xml.etree.ElementTree.Element(_tag('D', 'href'))
-	href.text = environ['SCRIPT_NAME']
+	href.text = environ['SCRIPT_NAME'] + 'calendar'
 	element.append(href)
 	return element
 
@@ -121,7 +104,7 @@ def getetag(element, environ, service):
 
 def current_user_privilege(element, environ, service):
 	href = xml.etree.ElementTree.Element(_tag('D', 'href'))
-	href.text = environ['SCRIPT_NAME']
+	href.text = environ['SCRIPT_NAME'] + 'user'
 	element.append(href)
 	return element
 
@@ -133,7 +116,7 @@ def current_user_privilege_set(element, environ, service):
 	return element
 
 def owner(element, environ, service):
-	element.text = environ['SCRIPT_NAME']
+	element.text = environ['SCRIPT_NAME'] + 'user'
 	return element
 
 def calendar_timezone(element, environ, service):
@@ -150,16 +133,16 @@ prop_functions = {
 	'owner': owner,
 
 #	rfc 3744 (webdav access control)
-	'principal-URL': script_name,
-	'principal-collection-set': script_name,
+	'principal-URL': calendar_uri,
+	'principal-collection-set': calendar_uri,
 
 #	ietf draft desruisseaux-caldav-sched (extension to rfc4918)
-	'calendar-home-set': script_name,
-	'calendar-user-address-set': script_name,
+	'calendar-home-set': calendar_uri,
+	'calendar-user-address-set': calendar_uri,
 	'calendar-timezone': calendar_timezone,
 	'calendar-description': calendar_description,
 	'supported-calendar-component-set': supported_calendar_component_set,
-	'schedule-default-calendar-URL': script_name,
+	'schedule-default-calendar-URL': calendar_uri,
 
 	'supported-report-set': supported_report_set,
 	'current-user-privilege': current_user_privilege,
@@ -241,13 +224,11 @@ def propfind(environ, service):
 		multistatus.append(response)
 
 	headers.append(('Content-Type', 'application/xml'))
-	return _pretty_xml(multistatus), httplib.MULTI_STATUS, headers
+	return xml.etree.ElementTree.tostring(multistatus), httplib.MULTI_STATUS, headers
 
 def put(environ, service):
 	headers = []
 	resource = environ['PATH_INFO']
-	if resource == '':
-		return 'ERROR3', httplib.INTERNAL_SERVER_ERROR, headers
 	input = environ['wsgi.input']
 	data = input.read()
 
@@ -362,7 +343,7 @@ def report(environ, service):
 	multistatus.append(response)
 
 	headers.append(('Content-Type', 'application/xml'))
-	return _pretty_xml(multistatus), httplib.OK, headers
+	return xml.etree.ElementTree.tostring(multistatus), httplib.OK, headers
 
 methods = {
 	'OPTIONS': options,
@@ -447,7 +428,6 @@ def application(environ, start_response, exc_info=None):
 	headers.append(('Content-Length', str(len(output))))
 	headers.append(('Connection', 'close'))
 	start_response(_response(status), headers)
-	print >> environ['wsgi.errors'], output
 	return [output]
 
 if __name__ == '__main__':
