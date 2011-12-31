@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 
 import re
 import random
@@ -133,16 +133,16 @@ prop_functions = {
 	'owner': owner,
 
 #	rfc 3744 (webdav access control)
-	'principal-URL': calendar_uri,
-	'principal-collection-set': calendar_uri,
+	'principal-URL': calendar_href,
+	'principal-collection-set': calendar_href,
 
 #	ietf draft desruisseaux-caldav-sched (extension to rfc4918)
-	'calendar-home-set': calendar_uri,
-	'calendar-user-address-set': calendar_uri,
+	'calendar-home-set': calendar_href,
+	'calendar-user-address-set': calendar_href,
 	'calendar-timezone': calendar_timezone,
 	'calendar-description': calendar_description,
 	'supported-calendar-component-set': supported_calendar_component_set,
-	'schedule-default-calendar-URL': calendar_uri,
+	'schedule-default-calendar-URL': calendar_href,
 
 	'supported-report-set': supported_report_set,
 	'current-user-privilege': current_user_privilege,
@@ -426,7 +426,6 @@ def application(environ, start_response, exc_info=None):
 		headers.append(('Content-Type', 'text/plain'))
 
 	headers.append(('Content-Length', str(len(output))))
-	headers.append(('Connection', 'close'))
 	start_response(_response(status), headers)
 	return [output]
 
